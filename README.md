@@ -11,9 +11,10 @@ Markowitz is unstable out of sample because it inverts a noisy covariance matrix
 - `src/data_loader.py` — Yahoo Finance download, log returns, rolling train/test splits
 - `src/covariance.py` — empirical covariance, Ledoit-Wolf, OAS, comparison helper
 - `src/hrp.py` — HRP: distance matrix, Ward clustering, quasi-diagonalization, recursive bisection
-- `src/allocators.py` — equal weight, inverse variance, Markowitz min-variance (CVXPY or scipy)
+- `src/allocators.py` — equal weight, inverse variance, Markowitz (long-only + short + leverage), Risk Parity
 - `src/backtester.py` — walk-forward backtest engine, comprehensive performance metrics
 - `src/analysis.py` — weight stability, rolling metrics, stress tests, robustness analysis
+- `src/simulation.py` — block bootstrap for Sharpe distribution estimation
 - `src/visualization.py` — dendrogram, correlation heatmaps, cumulative returns, drawdowns, rolling Sharpe
 - `notebooks/` — 4 notebooks: data exploration, covariance analysis, HRP walkthrough, full backtest
 - `tests/` — unit tests
@@ -60,7 +61,7 @@ from src.backtester import Backtester
 
 bt = Backtester(
     returns=returns,
-    allocators=['hrp', 'markowitz', 'inverse_variance', 'equal_weight'],
+    allocators=['hrp', 'markowitz', 'inverse_variance', 'equal_weight', 'risk_parity'],
     cov_estimators=['empirical', 'ledoit_wolf'],
     train_window=3*252,
     test_window=252,
@@ -91,7 +92,7 @@ from src.analysis import (
 for strat, weights_df in bt.weights_history_.items():
     plot_weight_heatmap(weights_df, title=f'{strat} — weights over time')
 
-# Stress test
+# Stress test by subperiod
 periods = {
     'GFC': ('2007-10-01', '2009-03-31'),
     'COVID': ('2020-02-01', '2020-04-30'),
@@ -105,6 +106,40 @@ sens = rolling_window_sensitivity(
     train_windows=[252, 2*252, 3*252, 4*252]
 )
 print(sens)
+```
+
+---
+
+## Bootstrap
+
+```python
+from src.simulation import compare_allocators_bootstrap, bootstrap_summary, plot_bootstrap_distributions
+from src.hrp import HRP
+from src.allocators import RiskParityAllocator, EqualWeightAllocator
+
+allocator_fns = {
+    'hrp_lw':       lambda r: HRP().fit(r, cov_estimator='ledoit_wolf'),
+    'risk_parity':  lambda r: RiskParityAllocator('ledoit_wolf').fit(r),
+    'equal_weight': lambda r: EqualWeightAllocator().fit(r),
+}
+
+bs = compare_allocators_bootstrap(returns, allocator_fns, n_bootstrap=500)
+print(bootstrap_summary(bs))
+plot_bootstrap_distributions(bs)
+```
+
+---
+
+## Constraints (long-only vs leverage)
+
+```python
+from src.allocators import MarkowitzMinVarianceAllocator
+
+# Long-only, fully invested (default)
+long_only = MarkowitzMinVarianceAllocator('ledoit_wolf', allow_short=False)
+
+# Allow short, max leverage 1.3
+with_short = MarkowitzMinVarianceAllocator('ledoit_wolf', allow_short=True, max_leverage=1.3)
 ```
 
 ---
@@ -128,6 +163,7 @@ The backtester computes:
 - Rolling Sharpe over time
 - Stress test performance by subperiod
 - Sensitivity to training window length
+- Bootstrap Sharpe distribution with confidence intervals
 
 ---
 
@@ -145,7 +181,9 @@ HRP is based on López de Prado (2016): the dendrogram leaf ordering replaces co
 
 Markowitz with Ledoit-Wolf is included as a middle-ground — better covariance, but still inverts it. The point is that shrinkage alone isn't enough; the allocation structure matters.
 
-Transaction costs are accounted for at each rebalance. Default is 10 bps (0.1%) per rebalance, configurable in the `Backtester` constructor.
+Risk Parity (ERC, Maillard et al. 2010) is added as a structural benchmark: no inversion either, but targets equal risk contribution rather than hierarchical clustering.
+
+Transaction costs are applied at each rebalance. Default is 10 bps (0.1%), configurable in the `Backtester` constructor.
 
 ---
 
