@@ -1,0 +1,21 @@
+# Multi-asset ETF universe for portfolio optimization
+# ─── US Equities ──────────────────────────────────────
+SPY
+QQQ
+IWM
+# ─── International Equities ──────────────────────────
+EFA
+EEM
+# ─── Fixed Income ─────────────────────────────────────
+TLT
+AGG
+LQD
+HYG
+# ─── Commodities ──────────────────────────────────────
+GLD
+SLV
+DBC
+# ─── Real Estate ──────────────────────────────────────
+VNQ
+# ─── Alternatives ─────────────────────────────────────
+TIP
