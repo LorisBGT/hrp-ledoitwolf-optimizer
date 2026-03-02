@@ -1,9 +1,8 @@
 """
 Rolling-window backtesting engine.
 
-Supports pluggable allocators and covariance estimators.
-Computes performance metrics: Sharpe, volatility, max drawdown,
-Calmar, Sortino, turnover, and HHI concentration.
+For each window: fit on training data, apply weights to test period, record returns.
+Repeats for every (allocator x covariance estimator) combination.
 """
 
 from typing import Dict, List, Optional, Tuple
@@ -20,33 +19,17 @@ from src.allocators import (
 
 class Backtester:
     """
-    Walk-forward backtesting engine.
+    Walk-forward backtest.
 
     Parameters
     ----------
     returns : pd.DataFrame
-        Full daily return series.
-    allocators : list of str
-        Allocation methods: 'hrp', 'markowitz', 'inverse_variance', 'equal_weight'.
-    cov_estimators : list of str
-        Covariance estimators: 'empirical', 'ledoit_wolf', 'oas'.
-    train_window : int
-        Training window in days (default 3*252).
-    test_window : int
-        Test / rebalance window in days (default 252).
-    rebalance_freq : str
-        'monthly' or 'annual' — controls within-test-period rebalancing.
-
-    Examples
-    --------
-    >>> bt = Backtester(returns, allocators=['hrp', 'equal_weight'],
-    ...                 cov_estimators=['ledoit_wolf', 'empirical'])
-    >>> results = bt.run_backtest()
-    >>> metrics = bt.compute_metrics(results)
-    >>> print(metrics)
+    allocators : list of str  — 'hrp', 'markowitz', 'inverse_variance', 'equal_weight'
+    cov_estimators : list of str  — 'empirical', 'ledoit_wolf', 'oas'
+    train_window : int   default 3*252
+    test_window : int    default 252
+    rebalance_freq : str  not used for step size yet, just stored
     """
-
-    REBALANCE_MAP = {'monthly': 21, 'annual': 252}
 
     def __init__(
         self,
@@ -64,154 +47,88 @@ class Backtester:
         self.test_window = test_window
         self.rebalance_freq = rebalance_freq
 
-    # ── private helpers ──────────────────────────────────────────────────────
-
-    def _get_allocator(self, alloc_name: str, cov_estimator: str):
-        """Return the appropriate allocator instance."""
-        if alloc_name == 'equal_weight':
+    def _make_allocator(self, name: str, cov_est: str):
+        if name == 'equal_weight':
             return EqualWeightAllocator()
-        elif alloc_name == 'inverse_variance':
-            return InverseVarianceAllocator(cov_estimator=cov_estimator)
-        elif alloc_name == 'markowitz':
-            return MarkowitzMinVarianceAllocator(
-                cov_estimator=cov_estimator, min_weight=0.0, max_weight=1.0
-            )
-        elif alloc_name == 'hrp':
+        if name == 'inverse_variance':
+            return InverseVarianceAllocator(cov_estimator=cov_est)
+        if name == 'markowitz':
+            return MarkowitzMinVarianceAllocator(cov_estimator=cov_est)
+        if name == 'hrp':
             return HRP()
-        else:
-            raise ValueError(f"Unknown allocator: {alloc_name}")
+        raise ValueError(f'unknown allocator: {name}')
 
-    def _compute_weights(
-        self,
-        train_data: pd.DataFrame,
-        alloc_name: str,
-        cov_estimator: str
-    ) -> pd.Series:
-        """Compute portfolio weights for one training window."""
-        allocator = self._get_allocator(alloc_name, cov_estimator)
-        if alloc_name == 'hrp':
-            return allocator.fit(train_data, cov_estimator=cov_estimator)
-        else:
-            return allocator.fit(train_data)
+    def _get_weights(self, train: pd.DataFrame, name: str, cov_est: str) -> pd.Series:
+        alloc = self._make_allocator(name, cov_est)
+        if name == 'hrp':
+            return alloc.fit(train, cov_estimator=cov_est)
+        return alloc.fit(train)
 
-    @staticmethod
-    def _portfolio_returns(
-        weights: pd.Series,
-        test_data: pd.DataFrame
-    ) -> pd.Series:
-        """Apply constant weights over test window."""
-        return (test_data * weights).sum(axis=1)
-
-    # ── public API ───────────────────────────────────────────────────────────
-
-    def run_backtest(
-        self,
-        verbose: bool = True
-    ) -> pd.DataFrame:
+    def run_backtest(self, verbose: bool = True) -> pd.DataFrame:
         """
-        Run rolling-window backtest for all (allocator × cov_estimator) combinations.
+        Run full walk-forward backtest.
 
         Returns
         -------
-        pd.DataFrame
-            Portfolio returns for each strategy, DatetimeIndex columns = strategy names.
+        pd.DataFrame  daily returns, one column per strategy
         """
-        splits = split_data_rolling(
-            self.returns,
-            train_window=self.train_window,
-            test_window=self.test_window
-        )
-
-        strategy_returns: Dict[str, List[pd.Series]] = {}
+        splits = split_data_rolling(self.returns, self.train_window, self.test_window)
+        out: Dict[str, List[pd.Series]] = {}
 
         for alloc_name in self.allocators:
             for cov_est in self.cov_estimators:
-                # Skip redundant combinations for equal_weight
                 if alloc_name == 'equal_weight' and cov_est != self.cov_estimators[0]:
                     continue
 
-                strategy_name = (
-                    f"{alloc_name}" if alloc_name == 'equal_weight'
-                    else f"{alloc_name}_{cov_est}"
-                )
-
+                key = alloc_name if alloc_name == 'equal_weight' else f'{alloc_name}_{cov_est}'
                 if verbose:
-                    print(f"Running: {strategy_name} ...")
+                    print(f'  {key}')
 
-                period_returns = []
-                for train_data, test_data in splits:
+                chunks = []
+                for train, test in splits:
                     try:
-                        weights = self._compute_weights(train_data, alloc_name, cov_est)
-                        port_ret = self._portfolio_returns(weights, test_data)
-                        period_returns.append(port_ret)
+                        w = self._get_weights(train, alloc_name, cov_est)
+                        chunks.append((test * w).sum(axis=1))
                     except Exception as e:
                         if verbose:
-                            print(f"  Warning: skipping window — {e}")
+                            print(f'    skipped: {e}')
 
-                if period_returns:
-                    strategy_returns[strategy_name] = pd.concat(period_returns)
+                if chunks:
+                    out[key] = pd.concat(chunks).sort_index()
 
-        results = pd.DataFrame(strategy_returns)
-        results = results.sort_index()
-
-        if verbose:
-            print(f"\nBacktest complete. Shape: {results.shape}")
-        return results
+        return pd.DataFrame(out)
 
     @staticmethod
-    def compute_metrics(
-        portfolio_returns: pd.DataFrame,
-        periods_per_year: int = 252
-    ) -> pd.DataFrame:
+    def compute_metrics(results: pd.DataFrame, ann: int = 252) -> pd.DataFrame:
         """
-        Compute annualised performance metrics for each strategy.
-
-        Metrics
-        -------
-        Annualised Return, Volatility, Sharpe Ratio, Max Drawdown,
-        Calmar Ratio, Sortino Ratio.
-
-        Parameters
-        ----------
-        portfolio_returns : pd.DataFrame
-            Daily returns, one column per strategy.
-        periods_per_year : int
+        Annualised performance metrics for each strategy.
 
         Returns
         -------
-        pd.DataFrame
-            Metrics table (rows = metrics, columns = strategies).
+        pd.DataFrame  rows = strategies
         """
-        metrics: Dict[str, Dict] = {}
+        rows = {}
+        for col in results.columns:
+            r = results[col].dropna()
+            mu = r.mean() * ann
+            sigma = r.std() * np.sqrt(ann)
+            sharpe = mu / sigma if sigma > 0 else np.nan
 
-        for col in portfolio_returns.columns:
-            r = portfolio_returns[col].dropna()
-            ann_ret = r.mean() * periods_per_year
-            ann_vol = r.std() * np.sqrt(periods_per_year)
-            sharpe = ann_ret / ann_vol if ann_vol > 0 else np.nan
-
-            # Drawdown
             cum = (1 + r).cumprod()
-            rolling_max = cum.cummax()
-            drawdown = (cum - rolling_max) / rolling_max
-            max_dd = drawdown.min()
+            max_dd = ((cum / cum.cummax()) - 1).min()
+            calmar = mu / abs(max_dd) if max_dd < 0 else np.nan
+            down = r[r < 0].std() * np.sqrt(ann)
+            sortino = mu / down if down > 0 else np.nan
 
-            calmar = ann_ret / abs(max_dd) if max_dd < 0 else np.nan
-
-            # Sortino
-            downside = r[r < 0].std() * np.sqrt(periods_per_year)
-            sortino = ann_ret / downside if downside > 0 else np.nan
-
-            metrics[col] = {
-                'Ann. Return': f"{ann_ret:.2%}",
-                'Ann. Volatility': f"{ann_vol:.2%}",
-                'Sharpe Ratio': f"{sharpe:.3f}",
-                'Max Drawdown': f"{max_dd:.2%}",
-                'Calmar Ratio': f"{calmar:.3f}",
-                'Sortino Ratio': f"{sortino:.3f}",
+            rows[col] = {
+                'ann_return': f'{mu:.2%}',
+                'ann_vol': f'{sigma:.2%}',
+                'sharpe': f'{sharpe:.3f}',
+                'max_dd': f'{max_dd:.2%}',
+                'calmar': f'{calmar:.3f}',
+                'sortino': f'{sortino:.3f}',
             }
-
-        return pd.DataFrame(metrics).T
+        return pd.DataFrame(rows).T
 
     def plot_cumulative_returns(
         self,
@@ -219,22 +136,12 @@ class Backtester:
         figsize: Tuple[int, int] = (14, 7),
         save_path: Optional[str] = None
     ) -> None:
-        """Plot cumulative portfolio returns for all strategies."""
         import matplotlib.pyplot as plt
-
-        cumulative = (1 + results).cumprod()
-
-        fig, ax = plt.subplots(figsize=figsize)
-        for col in cumulative.columns:
-            ax.plot(cumulative.index, cumulative[col], label=col, linewidth=1.5)
-
-        ax.set_title('Cumulative Portfolio Returns (Out-of-Sample)', fontsize=14)
-        ax.set_xlabel('Date')
-        ax.set_ylabel('Growth of $1')
-        ax.legend(loc='upper left', fontsize=9)
-        ax.grid(True, alpha=0.3)
+        ax = (1 + results).cumprod().plot(figsize=figsize, linewidth=1.5)
+        ax.set_title('cumulative returns (out-of-sample)')
+        ax.set_ylabel('growth of $1')
+        ax.grid(alpha=0.3)
         plt.tight_layout()
-
         if save_path:
             plt.savefig(save_path, dpi=150, bbox_inches='tight')
         plt.show()

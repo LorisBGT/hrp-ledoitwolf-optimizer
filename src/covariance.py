@@ -1,41 +1,21 @@
 """
-Covariance estimation module.
+Covariance estimation.
 
-Implements empirical covariance, Ledoit-Wolf shrinkage, and OAS
-for robust portfolio covariance estimation.
-
-References
-----------
-Ledoit & Wolf (2004). "Honey, I Shrunk the Sample Covariance Matrix".
-Journal of Portfolio Management, 30(4), 110-119.
+Three estimators: sample covariance, Ledoit-Wolf shrinkage, OAS.
+Ledoit-Wolf shrinks toward a scaled identity matrix with the analytically
+optimal intensity — reduces condition number and stabilises downstream allocation.
 """
 
 from typing import Tuple, Optional
 import numpy as np
 import pandas as pd
 from sklearn.covariance import LedoitWolf, OAS
-from sklearn.covariance import empirical_covariance as _sklearn_emp
+from sklearn.covariance import empirical_covariance as _emp_cov
 
 
 def empirical_covariance(returns: pd.DataFrame) -> np.ndarray:
-    """
-    Compute standard sample covariance matrix.
-
-    Parameters
-    ----------
-    returns : pd.DataFrame
-        Asset returns, shape (n_samples, n_assets).
-
-    Returns
-    -------
-    np.ndarray
-        Covariance matrix, shape (n_assets, n_assets).
-
-    Notes
-    -----
-    Σ = (1/T) X'X   (centered)
-    """
-    return _sklearn_emp(returns.values)
+    """Standard sample covariance."""
+    return _emp_cov(returns.values)
 
 
 def ledoit_wolf_covariance(
@@ -43,33 +23,12 @@ def ledoit_wolf_covariance(
     assume_centered: bool = False
 ) -> Tuple[np.ndarray, float]:
     """
-    Compute Ledoit-Wolf shrunk covariance matrix.
+    Ledoit-Wolf shrunk covariance.
 
-    Parameters
-    ----------
-    returns : pd.DataFrame
-        Asset returns.
-    assume_centered : bool
-        If True, skip centering.
-
-    Returns
-    -------
-    cov : np.ndarray
-        Shrunk covariance matrix.
-    shrinkage : float
-        Optimal shrinkage coefficient α ∈ [0, 1].
-
-    Notes
-    -----
-    Σ_LW = (1 - α)·Σ_emp + α·(trace(Σ)/n)·I
-    The coefficient α minimises the Frobenius-norm MSE.
-
-    References
-    ----------
-    Ledoit & Wolf (2004). SSRN: https://papers.ssrn.com/sol3/papers.cfm?abstract_id=433840
+    Returns the shrunk matrix and the shrinkage intensity alpha in [0, 1].
+    Higher alpha means more shrinkage toward (tr(S)/n)*I.
     """
-    lw = LedoitWolf(assume_centered=assume_centered)
-    lw.fit(returns.values)
+    lw = LedoitWolf(assume_centered=assume_centered).fit(returns.values)
     return lw.covariance_, lw.shrinkage_
 
 
@@ -78,28 +37,10 @@ def oas_covariance(
     assume_centered: bool = False
 ) -> Tuple[np.ndarray, float]:
     """
-    Compute Oracle Approximating Shrinkage (OAS) covariance.
-
-    Parameters
-    ----------
-    returns : pd.DataFrame
-        Asset returns.
-    assume_centered : bool
-        If True, skip centering.
-
-    Returns
-    -------
-    cov : np.ndarray
-        OAS shrunk covariance matrix.
-    shrinkage : float
-        OAS shrinkage coefficient.
-
-    References
-    ----------
-    Chen et al. (2010). "Shrinkage Algorithms for MMSE Covariance Estimation".
+    Oracle Approximating Shrinkage (OAS).
+    Better convergence than LW under Gaussian assumption.
     """
-    oas = OAS(assume_centered=assume_centered)
-    oas.fit(returns.values)
+    oas = OAS(assume_centered=assume_centered).fit(returns.values)
     return oas.covariance_, oas.shrinkage_
 
 
@@ -108,57 +49,35 @@ def compare_estimators(
     true_cov: Optional[np.ndarray] = None
 ) -> pd.DataFrame:
     """
-    Compare covariance estimators on key numerical metrics.
-
-    Parameters
-    ----------
-    returns : pd.DataFrame
-        Asset returns.
-    true_cov : np.ndarray, optional
-        True covariance (for simulation studies — computes Frobenius error).
-
-    Returns
-    -------
-    pd.DataFrame
-        Metrics table: shrinkage, condition number, min/max eigenvalue,
-        Frobenius error (if true_cov provided).
+    Quick comparison table: condition number, eigenvalues,
+    and Frobenius error (if true_cov is provided, e.g. in simulation).
     """
     cov_emp = empirical_covariance(returns)
-    cov_lw, alpha_lw = ledoit_wolf_covariance(returns)
-    cov_oas, alpha_oas = oas_covariance(returns)
+    cov_lw, a_lw = ledoit_wolf_covariance(returns)
+    cov_oas, a_oas = oas_covariance(returns)
 
     rows = []
     for name, cov, alpha in [
-        ('Empirical', cov_emp, 0.0),
-        ('Ledoit-Wolf', cov_lw, alpha_lw),
-        ('OAS', cov_oas, alpha_oas),
+        ('empirical', cov_emp, 0.0),
+        ('ledoit_wolf', cov_lw, a_lw),
+        ('oas', cov_oas, a_oas),
     ]:
         eig = np.linalg.eigvalsh(cov)
         row = {
-            'Estimator': name,
-            'Shrinkage': alpha,
-            'Condition Number': np.linalg.cond(cov),
-            'Min Eigenvalue': eig.min(),
-            'Max Eigenvalue': eig.max(),
+            'estimator': name,
+            'shrinkage': round(alpha, 4),
+            'cond_number': round(np.linalg.cond(cov), 1),
+            'min_eig': round(eig.min(), 6),
+            'max_eig': round(eig.max(), 4),
         }
         if true_cov is not None:
-            row['Frobenius Error'] = np.linalg.norm(cov - true_cov, 'fro')
+            row['frob_error'] = round(np.linalg.norm(cov - true_cov, 'fro'), 4)
         rows.append(row)
 
     return pd.DataFrame(rows)
 
 
 def compute_correlation_from_covariance(cov: np.ndarray) -> np.ndarray:
-    """Convert covariance matrix to correlation matrix."""
+    """Normalise covariance to correlation matrix."""
     std = np.sqrt(np.diag(cov))
     return cov / np.outer(std, std)
-
-
-if __name__ == "__main__":
-    np.random.seed(42)
-    n, T = 10, 500
-    true_cov = np.eye(n) + 0.5 * np.ones((n, n))
-    X = np.random.multivariate_normal(np.zeros(n), true_cov, T)
-    returns = pd.DataFrame(X, columns=[f'A{i}' for i in range(n)])
-
-    print(compare_estimators(returns, true_cov=true_cov).to_string(index=False))
