@@ -1,8 +1,5 @@
 """
-Data loading and preprocessing.
-
-Handles downloading from Yahoo Finance, cleaning missing values,
-computing returns, and generating rolling windows for walk-forward backtesting.
+Data loading and preprocessing for walk-forward backtesting.
 """
 
 from typing import List, Tuple, Optional, Union
@@ -19,15 +16,7 @@ def download_price_data(
     """
     Download adjusted close prices from Yahoo Finance.
 
-    Parameters
-    ----------
-    tickers : list or str
-    start_date : str  e.g. '2010-01-01'
-    end_date : str
-
-    Returns
-    -------
-    pd.DataFrame  DatetimeIndex, one column per ticker
+    Returns a DataFrame with DatetimeIndex and one column per ticker.
     """
     if isinstance(tickers, str):
         tickers = [tickers]
@@ -53,13 +42,10 @@ def clean_price_data(
     max_missing: float = 0.05
 ) -> pd.DataFrame:
     """
-    Drop assets with too many NaNs, forward-fill the rest.
+    Drop assets exceeding the missing data threshold, then forward-fill.
 
-    Parameters
-    ----------
-    prices : pd.DataFrame
-    fill_method : str   'ffill', 'bfill', or 'interpolate'
-    max_missing : float  fraction threshold (default 5%)
+    fill_method: 'ffill', 'bfill', or 'interpolate'
+    max_missing: fraction threshold (default 5%)
     """
     missing_frac = prices.isna().sum() / len(prices)
     to_drop = missing_frac[missing_frac > max_missing].index.tolist()
@@ -84,14 +70,7 @@ def compute_returns(
     prices: pd.DataFrame,
     method: str = 'log'
 ) -> pd.DataFrame:
-    """
-    Compute daily returns.
-
-    Parameters
-    ----------
-    prices : pd.DataFrame
-    method : str   'log' or 'simple'
-    """
+    """Daily returns. method: 'log' or 'simple'."""
     if method == 'log':
         return np.log(prices / prices.shift(1)).iloc[1:]
     elif method == 'simple':
@@ -105,16 +84,7 @@ def split_data_rolling(
     test_window: int = 252,
     step_size: Optional[int] = None
 ) -> List[Tuple[pd.DataFrame, pd.DataFrame]]:
-    """
-    Rolling train/test splits for walk-forward backtesting.
-
-    Parameters
-    ----------
-    returns : pd.DataFrame
-    train_window : int   default 3 years = 756 days
-    test_window : int    default 1 year = 252 days
-    step_size : int      step between windows; defaults to test_window
-    """
+    """Rolling train/test splits for walk-forward backtesting."""
     step = step_size or test_window
     splits = []
     for i in range(0, len(returns) - train_window - test_window + 1, step):
@@ -126,7 +96,7 @@ def split_data_rolling(
 
 
 def get_default_etf_universe() -> List[str]:
-    """14 liquid ETFs across equities, bonds, commodities, real estate."""
+    """14 liquid ETFs: equities, bonds, commodities, real estate."""
     return [
         'SPY', 'QQQ', 'IWM',
         'EFA', 'EEM',

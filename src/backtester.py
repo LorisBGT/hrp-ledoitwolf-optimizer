@@ -1,8 +1,8 @@
 """
-Rolling-window backtesting engine.
+Walk-forward backtest engine.
 
-For each window: fit on training data, apply weights to test period, record returns.
-Repeats for every (allocator x covariance estimator) combination.
+For each window: fit on training data, apply weights to test period.
+Runs every (allocator x covariance estimator) combination.
 """
 
 from typing import Dict, List, Optional, Tuple
@@ -19,16 +19,13 @@ from src.allocators import (
 
 class Backtester:
     """
-    Walk-forward backtest.
-
     Parameters
     ----------
     returns : pd.DataFrame
-    allocators : list of str  — 'hrp', 'markowitz', 'inverse_variance', 'equal_weight'
-    cov_estimators : list of str  — 'empirical', 'ledoit_wolf', 'oas'
+    allocators : list of str   'hrp', 'markowitz', 'inverse_variance', 'equal_weight'
+    cov_estimators : list of str   'empirical', 'ledoit_wolf', 'oas'
     train_window : int   default 3*252
     test_window : int    default 252
-    rebalance_freq : str  not used for step size yet, just stored
     """
 
     def __init__(
@@ -66,11 +63,8 @@ class Backtester:
 
     def run_backtest(self, verbose: bool = True) -> pd.DataFrame:
         """
-        Run full walk-forward backtest.
-
-        Returns
-        -------
-        pd.DataFrame  daily returns, one column per strategy
+        Run the full walk-forward backtest.
+        Returns a DataFrame of daily returns, one column per strategy.
         """
         splits = split_data_rolling(self.returns, self.train_window, self.test_window)
         out: Dict[str, List[pd.Series]] = {}
@@ -100,13 +94,7 @@ class Backtester:
 
     @staticmethod
     def compute_metrics(results: pd.DataFrame, ann: int = 252) -> pd.DataFrame:
-        """
-        Annualised performance metrics for each strategy.
-
-        Returns
-        -------
-        pd.DataFrame  rows = strategies
-        """
+        """Annualised performance metrics: return, vol, Sharpe, max drawdown, Calmar, Sortino."""
         rows = {}
         for col in results.columns:
             r = results[col].dropna()

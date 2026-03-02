@@ -1,9 +1,9 @@
 """
-Baseline portfolio allocators for comparison with HRP.
+Baseline allocators for comparison with HRP.
 
-Three methods: equal weight, inverse variance, Markowitz min-variance.
-Markowitz is included mainly to show the instability problem — with and
-without Ledoit-Wolf shrinkage applied to the covariance.
+Equal weight, inverse variance, Markowitz min-variance.
+Markowitz is included to show what happens with and without Ledoit-Wolf
+shrinkage — better covariance, still inverts it.
 """
 
 from typing import Dict, Optional
@@ -19,12 +19,10 @@ except ImportError:
 
 
 def equal_weight_portfolio(n: int) -> np.ndarray:
-    """1/N weights."""
     return np.ones(n) / n
 
 
 def inverse_variance_portfolio(cov: np.ndarray) -> np.ndarray:
-    """w_i proportional to 1/sigma_i^2."""
     inv = 1.0 / np.diag(cov)
     return inv / inv.sum()
 
@@ -34,10 +32,7 @@ def markowitz_min_variance(
     min_w: float = 0.0,
     max_w: float = 1.0,
 ) -> np.ndarray:
-    """
-    Global minimum variance portfolio.
-    Uses CVXPY if available, scipy SLSQP otherwise.
-    """
+    """Global minimum variance. Uses CVXPY if available, scipy SLSQP otherwise."""
     n = cov.shape[0]
 
     if _CVXPY:
@@ -62,8 +57,6 @@ def markowitz_min_variance(
             raise RuntimeError(f'scipy failed: {res.message}')
         return res.x
 
-
-# class wrappers used by the backtester
 
 class BaseAllocator:
     def __init__(self, name: str) -> None:

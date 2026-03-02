@@ -1,9 +1,8 @@
 """
-Covariance estimation.
+Covariance estimation: sample, Ledoit-Wolf shrinkage, OAS.
 
-Three estimators: sample covariance, Ledoit-Wolf shrinkage, OAS.
-Ledoit-Wolf shrinks toward a scaled identity matrix with the analytically
-optimal intensity — reduces condition number and stabilises downstream allocation.
+Ledoit-Wolf shrinks toward a scaled identity matrix with analytically
+optimal intensity — reduces condition number, stabilises downstream allocation.
 """
 
 from typing import Tuple, Optional
@@ -14,7 +13,6 @@ from sklearn.covariance import empirical_covariance as _emp_cov
 
 
 def empirical_covariance(returns: pd.DataFrame) -> np.ndarray:
-    """Standard sample covariance."""
     return _emp_cov(returns.values)
 
 
@@ -22,12 +20,7 @@ def ledoit_wolf_covariance(
     returns: pd.DataFrame,
     assume_centered: bool = False
 ) -> Tuple[np.ndarray, float]:
-    """
-    Ledoit-Wolf shrunk covariance.
-
-    Returns the shrunk matrix and the shrinkage intensity alpha in [0, 1].
-    Higher alpha means more shrinkage toward (tr(S)/n)*I.
-    """
+    """Returns (shrunk covariance, shrinkage intensity alpha in [0,1])."""
     lw = LedoitWolf(assume_centered=assume_centered).fit(returns.values)
     return lw.covariance_, lw.shrinkage_
 
@@ -36,10 +29,7 @@ def oas_covariance(
     returns: pd.DataFrame,
     assume_centered: bool = False
 ) -> Tuple[np.ndarray, float]:
-    """
-    Oracle Approximating Shrinkage (OAS).
-    Better convergence than LW under Gaussian assumption.
-    """
+    """OAS — better convergence than LW under Gaussian assumption."""
     oas = OAS(assume_centered=assume_centered).fit(returns.values)
     return oas.covariance_, oas.shrinkage_
 
@@ -48,10 +38,7 @@ def compare_estimators(
     returns: pd.DataFrame,
     true_cov: Optional[np.ndarray] = None
 ) -> pd.DataFrame:
-    """
-    Quick comparison table: condition number, eigenvalues,
-    and Frobenius error (if true_cov is provided, e.g. in simulation).
-    """
+    """Condition number, eigenvalue range, and Frobenius error across estimators."""
     cov_emp = empirical_covariance(returns)
     cov_lw, a_lw = ledoit_wolf_covariance(returns)
     cov_oas, a_oas = oas_covariance(returns)
@@ -78,6 +65,5 @@ def compare_estimators(
 
 
 def compute_correlation_from_covariance(cov: np.ndarray) -> np.ndarray:
-    """Normalise covariance to correlation matrix."""
     std = np.sqrt(np.diag(cov))
     return cov / np.outer(std, std)

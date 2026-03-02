@@ -1,13 +1,12 @@
 """
-Hierarchical Risk Parity (HRP).
+Hierarchical Risk Parity (López de Prado, 2016).
 
-Implementation of the Lopez de Prado (2016) algorithm:
   1. Distance matrix from correlation: d_ij = sqrt(0.5 * (1 - rho_ij))
   2. Ward hierarchical clustering
-  3. Quasi-diagonalization — reorder assets by dendrogram leaf order
-  4. Recursive bisection — allocate capital inversely to cluster variance
+  3. Quasi-diagonalization: reorder assets by dendrogram leaf order
+  4. Recursive bisection: allocate capital inversely to cluster variance
 
-No matrix inversion at any step, which is the stability advantage over Markowitz.
+No matrix inversion involved — that's the point.
 """
 
 from typing import Dict, List, Optional, Tuple
@@ -19,17 +18,15 @@ import matplotlib.pyplot as plt
 
 
 def compute_distance_matrix(corr: np.ndarray) -> np.ndarray:
-    """d_ij = sqrt(0.5 * (1 - rho_ij)). Ranges from 0 to 1."""
+    """d_ij = sqrt(0.5 * (1 - rho_ij)), values in [0, 1]."""
     return np.sqrt(np.clip(0.5 * (1.0 - corr), 0, None))
 
 
 def hierarchical_clustering(dist: np.ndarray, method: str = 'ward') -> np.ndarray:
-    """Ward linkage on a symmetric distance matrix."""
     return sch.linkage(squareform(dist, checks=False), method=method)
 
 
 def quasi_diagonalization(linkage: np.ndarray) -> List[int]:
-    """Asset indices in dendrogram leaf order."""
     return sch.leaves_list(linkage).tolist()
 
 
@@ -43,13 +40,8 @@ def _cluster_var(cov: np.ndarray, idx: List[int]) -> float:
 
 def recursive_bisection(cov: np.ndarray, sorted_idx: List[int]) -> np.ndarray:
     """
-    Allocate weights by recursively splitting the dendrogram.
-
-    At each split: left and right sub-clusters each get capital
-    proportional to the *other* cluster's variance (lower variance = more capital).
-    Recurse until every cluster is a single asset.
-
-    Returns weights that sum to 1, all non-negative.
+    Recursively split the dendrogram, allocating capital inversely
+    to cluster variance. Returns weights summing to 1.
     """
     n = len(sorted_idx)
     weights = np.ones(n)
@@ -81,8 +73,6 @@ class HRP:
     """
     HRP portfolio optimizer.
 
-    Usage
-    -----
     hrp = HRP()
     weights = hrp.fit(returns, cov_estimator='ledoit_wolf')
     hrp.plot_dendrogram()
@@ -101,13 +91,13 @@ class HRP:
         cov_estimator: str = 'ledoit_wolf'
     ) -> pd.Series:
         """
-        Fit HRP and return weights.
+        Fit HRP and return portfolio weights.
 
         Parameters
         ----------
         returns : pd.DataFrame
-        cov : np.ndarray, optional  pre-computed covariance
-        cov_estimator : str   'empirical', 'ledoit_wolf', or 'oas'
+        cov : np.ndarray, optional  pre-computed covariance matrix
+        cov_estimator : str         'empirical', 'ledoit_wolf', or 'oas'
         """
         from src.covariance import (
             empirical_covariance, ledoit_wolf_covariance, oas_covariance

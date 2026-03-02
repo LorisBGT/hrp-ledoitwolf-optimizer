@@ -1,20 +1,20 @@
 # hrp-ledoitwolf-optimizer
 
-Portfolio optimization project I built to explore an alternative to classic Markowitz — specifically combining Hierarchical Risk Parity with Ledoit-Wolf covariance shrinkage.
+Portfolio optimization project combining Hierarchical Risk Parity with Ledoit-Wolf covariance shrinkage.
 
-The idea is simple: Markowitz is famously unstable out of sample because it inverts a noisy covariance matrix. HRP sidesteps that by using hierarchical clustering instead of inversion. Ledoit-Wolf fixes the covariance estimation noise at the source. Putting both together seemed worth testing properly, so I set up a rolling backtest over 2008–2024 and compared against several baselines.
+Markowitz is unstable out of sample because it inverts a noisy covariance matrix. HRP sidesteps that by using hierarchical clustering instead of inversion. Ledoit-Wolf fixes the covariance estimation noise at the source. Putting both together seemed worth testing properly — rolling backtest over 2008–2024, compared against several baselines.
 
 ---
 
-## What's in here
+## Structure
 
-- `src/data_loader.py` — downloads from Yahoo Finance, computes log returns, generates rolling train/test splits
-- `src/covariance.py` — empirical covariance, Ledoit-Wolf, OAS, and a comparison helper
-- `src/hrp.py` — full HRP implementation: distance matrix, Ward clustering, quasi-diagonalization, recursive bisection
-- `src/allocators.py` — equal weight, inverse variance, Markowitz min-variance (CVXPY or scipy fallback)
+- `src/data_loader.py` — Yahoo Finance download, log returns, rolling train/test splits
+- `src/covariance.py` — empirical covariance, Ledoit-Wolf, OAS, comparison helper
+- `src/hrp.py` — HRP: distance matrix, Ward clustering, quasi-diagonalization, recursive bisection
+- `src/allocators.py` — equal weight, inverse variance, Markowitz min-variance (CVXPY or scipy)
 - `src/backtester.py` — walk-forward backtest engine, performance metrics
 - `src/visualization.py` — dendrogram, correlation heatmaps, cumulative returns, drawdowns, rolling Sharpe
-- `notebooks/` — 4 notebooks: data exploration, covariance analysis, HRP walkthrough, full backtest results
+- `notebooks/` — 4 notebooks: data exploration, covariance analysis, HRP walkthrough, full backtest
 - `tests/` — unit tests
 
 ---
@@ -52,7 +52,7 @@ hrp.plot_dendrogram()
 
 ---
 
-## Running the backtest
+## Backtest
 
 ```python
 from src.backtester import Backtester
@@ -74,7 +74,7 @@ bt.plot_cumulative_returns(results)
 
 ## Data
 
-14 ETFs: SPY, QQQ, IWM, EFA, EEM, TLT, AGG, LQD, HYG, GLD, SLV, DBC, VNQ, TIP. Period 2008–2024. All pulled from Yahoo Finance via `yfinance`, no API key needed.
+14 ETFs: SPY, QQQ, IWM, EFA, EEM, TLT, AGG, LQD, HYG, GLD, SLV, DBC, VNQ, TIP. Period 2008–2024, pulled from Yahoo Finance via `yfinance`.
 
 Covers enough market regimes to make the backtest meaningful: GFC, 2020 crash, 2022 rate shock.
 
@@ -90,9 +90,9 @@ pytest tests/ -v
 
 ## Notes
 
-HRP is based on López de Prado (2016) — the core idea is using the dendrogram leaf ordering to replace covariance matrix inversion with a hierarchical allocation. Ledoit-Wolf shrinkage (2004) handles the estimation noise in the covariance itself, pulling extreme eigenvalues toward the mean.
+HRP is based on López de Prado (2016): the dendrogram leaf ordering replaces covariance matrix inversion with a hierarchical allocation. Ledoit-Wolf shrinkage (2004) handles estimation noise, pulling extreme eigenvalues toward the mean.
 
-Markowitz with Ledoit-Wolf is included as a middle-ground: better covariance, still inverts it. It shows that shrinkage alone isn't enough — the allocation structure matters.
+Markowitz with Ledoit-Wolf is included as a middle-ground — better covariance, but still inverts it. The point is that shrinkage alone isn't enough; the allocation structure matters.
 
 ---
 
